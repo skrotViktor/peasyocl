@@ -13,7 +13,7 @@ Simply build and install using cmake. The package will be accessible with
 ## Usage
 ### Create the context
 ```
-peasyocl::DeformerContext* oclContext = peasyocl::DeformerContext::getInstance();
+peasyocl::Context* oclContext = peasyocl::Context::getInstance();
 oclContext->Init();
 oclContext->AddSource("kernelSource.cl");
 oclContext->Build();
