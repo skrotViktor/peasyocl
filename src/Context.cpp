@@ -1,4 +1,4 @@
-#include "DeformerContext.h"
+#include "Context.h"
 #include <iostream>
 #include <vector>
 #include <fstream>
@@ -7,7 +7,7 @@
 
 namespace peasyocl {
 
-int DeformerContext::Init() {
+int Context::Init() {
     if (initialized) {
         return 1;
     }
@@ -33,7 +33,7 @@ int DeformerContext::Init() {
     return 0;
 }
 
-int DeformerContext::AddSource(const std::string& fileName) {
+int Context::AddSource(const std::string& fileName) {
     cl_int err;
     cl::string source = _LoadShader(fileName, &err);
     if (err) {
@@ -45,7 +45,7 @@ int DeformerContext::AddSource(const std::string& fileName) {
     return 0;
 }
 
-int DeformerContext::Build() {
+int Context::Build() {
     if (built) {
         return 0;
     }
@@ -67,7 +67,7 @@ int DeformerContext::Build() {
     return 0;
 }
 
-KernelHandle* DeformerContext::AddKernel(const std::string& kernelName, const std::string& key, int* err) {
+KernelHandle* Context::AddKernel(const std::string& kernelName, const std::string& key, int* err) {
     if (_kernels.find(kernelName) != _kernels.end()) {
         printf("Error: Kernel with name %s already exists\n", kernelName.c_str());
         return nullptr;
@@ -93,11 +93,11 @@ KernelHandle* DeformerContext::AddKernel(const std::string& kernelName, const st
     return &_kernels[name];
 }
 
-KernelHandle* DeformerContext::GetKernelHandle(const std::string& name) {
+KernelHandle* Context::GetKernelHandle(const std::string& name) {
     return &_kernels[name];
 }
 
-int DeformerContext::Execute(const size_t& global, const std::string& kernelName) {
+int Context::Execute(const size_t& global, const std::string& kernelName) {
     if (!initialized) {
         return 1;
     }
@@ -126,12 +126,12 @@ int DeformerContext::Execute(const size_t& global, const std::string& kernelName
     return 0;
 }
 
-void DeformerContext::Finish() {
+void Context::Finish() {
     _queue.finish();
     _queue.flush();
 }
 
-cl::string DeformerContext::_LoadShader(const std::string_view& fileName, int* err) {
+cl::string Context::_LoadShader(const std::string_view& fileName, int* err) {
     cl::string kernelPath = utils::GetClFileByName(fileName.data());
     if (kernelPath.empty()) {
         *err = 1;

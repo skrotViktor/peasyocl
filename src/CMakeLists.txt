@@ -2,8 +2,8 @@ find_package(OpenCL REQUIRED)
 
 set(OPENCL_CLHPP_HEADERS_DIR .)
 
-set(SOURCES DeformerContext.cpp)
-set(HEADERS DeformerContext.h KernelUtils.h opencl.hpp)
+set(SOURCES Context.cpp)
+set(HEADERS Context.h KernelUtils.h opencl.hpp)
 
 add_library(${OCLMODULE_NAME}
     SHARED

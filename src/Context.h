@@ -171,7 +171,7 @@ struct KernelHandle {
  * @brief Singleton class to handle the opencl context
  * 
  */
-class DeformerContext {
+class Context {
 public:
     int Init();
     int Build();
@@ -181,8 +181,8 @@ public:
      * 
      * @return DeformerContext* 
      */
-    static DeformerContext* getInstance() {
-        static DeformerContext* ctx = new DeformerContext();
+    static Context* getInstance() {
+        static Context* ctx = new Context();
         return ctx;
     }
 
@@ -241,11 +241,11 @@ public:
     bool built = false;
 
 private:
-    DeformerContext() = default;
-    DeformerContext(const DeformerContext&) = delete;
-    DeformerContext(DeformerContext&&) = delete;
-    DeformerContext& operator = (const DeformerContext&) = delete;
-    DeformerContext& operator = (DeformerContext&&) = delete;
+    Context() = default;
+    Context(const Context&) = delete;
+    Context(Context&&) = delete;
+    Context& operator = (const Context&) = delete;
+    Context& operator = (Context&&) = delete;
 
     cl::string _LoadShader(const std::string_view& fileName, int* err);
 
