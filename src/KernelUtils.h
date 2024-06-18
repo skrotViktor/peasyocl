@@ -63,8 +63,6 @@ struct ClFile {
         const char *env = std::getenv(OCL_KERNEL_PATHS_ENVIRONMENT);
 
         if (!env) {
-            std::cout << "Failed: environment variable not set: "
-                      << OCL_KERNEL_PATHS_ENVIRONMENT << std::endl;
             return result;
         }
 

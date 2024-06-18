@@ -63,7 +63,7 @@ int Context::AddSource(const std::string_view &kernelCode) {
     return 0;
 }
 
-int Context::Build() {
+int Context::Build(const std::vector<std::string> &extraIncludes) {
     if (!initialized || _kernelCodes.empty()) {
         printf("Warning: Attempting to build unitialized program\n");
         built = false;
@@ -86,7 +86,9 @@ int Context::Build() {
     for (utils::ClFile clFile : utils::ClFile::GetKernelPaths()) {
         flags.append(std::string("-I ").append(clFile.path));
     }
-
+    for (std::string path : extraIncludes) {
+        flags.append(std::string("-I ").append(path));
+    }
     err = _program.build(_device, flags.c_str(), nullptr);
 
     if (err != CL_SUCCESS) {

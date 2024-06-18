@@ -203,7 +203,16 @@ struct KernelHandle {
 class Context {
   public:
     int Init();
-    int Build();
+
+    /**
+     * @brief Build the opencl program. Will by default look up
+     * OPENCL_KERNEL_PATHS env var to find include paths
+     *
+     * @param extraIncludes Pass additional include paths
+     * @return int
+     */
+    int Build(const std::vector<std::string> &extraIncludes =
+                  std::vector<std::string>());
 
     /**
      * @brief Get the Instance of the DeformerContext singleton
@@ -246,7 +255,7 @@ class Context {
     KernelHandle *AddKernel(const std::string &kernelName,
                             const std::string &key = "");
 
-    void RemoveKernel(KernelHandle* kernel);
+    void RemoveKernel(KernelHandle *kernel);
     // void RemoveKernel(const KernelHandle& kernel);
 
     /**
