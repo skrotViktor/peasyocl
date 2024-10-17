@@ -13,7 +13,6 @@
 // limitations under the License.
 
 #include "Context.h"
-#include <iostream>
 
 #include "KernelUtils.h"
 
@@ -23,6 +22,7 @@ int Context::Init() {
     if (initialized) {
         return 0;
     }
+
     cl_int err;
     _device = cl::Device::getDefault(&err);
     if (err != CL_SUCCESS) {
@@ -42,107 +42,137 @@ int Context::Init() {
         return 1;
     }
     initialized = true;
+
     return 0;
 }
 
-int Context::AddSource(const utils::ClFile &clfile) {
-    std::string kernelSource = clfile.LoadClKernelSource();
-    return AddSource(kernelSource);
+// int Context::AddSource(const utils::ClFile &clfile) {
+//     std::string kernelSource = clfile.LoadClKernelSource();
+//     return AddSource(kernelSource);
+// }
+
+// int Context::AddSource(const std::string_view &kernelCode) {
+//     if (!initialized) {
+//         printf("warning: Trying to add source to not initialized context");
+//         return 1;
+//     }
+//     if (kernelCode.empty()) {
+//         printf("Warning: Attempting to add empty kernel code\n");
+//         return 1;
+//     }
+    // _kernelCodes.push_back(std::string(kernelCode));
+    // return 0;
+// }
+
+// int Context::Build(const std::vector<std::string> &extraIncludes) {
+//     if (!initialized || _kernelCodes.empty()) {
+//         printf("Warning: Attempting to build unitialized program\n");
+//         return 1;
+//     }
+
+//     cl_int err;
+//     cl::Program program(_context, _kernelCodes, &err);
+
+//     std::string flags = "-cl-std=CL1.2 ";
+//     for (utils::ClFile clFile : utils::ClFile::GetKernelPaths()) {
+//         flags.append(std::string("-I ").append(clFile.path));
+//     }
+//     for (std::string path : extraIncludes) {
+//         flags.append(std::string("-I ").append(path));
+//     }
+//     err = program.build(_device, flags.c_str(), nullptr);
+
+//     if (err != CL_SUCCESS) {
+//         std::string t;
+//         program.getBuildInfo(_device, CL_PROGRAM_BUILD_LOG, &t);
+
+//         printf("%s \n", t.c_str());
+//         printf("Error: Failed to build program executable! %i \n", err);
+//         return 1;
+//     }
+
+//     return 0;
+// }
+
+void Context::AddBuffer(const std::string &name, SharedBuffer buffer, const size_t &size) {
+    _buffers.insert({name, {std::move(buffer), size}});    
 }
 
-int Context::AddSource(const std::string_view &kernelCode) {
-    if (!initialized) {
-        printf("warning: Trying to add source to not initialized context");
-        return 1;
+SharedBuffer Context::GetBuffer(const std::string &name) {
+    if (_buffers.count(name) == 0) {
+        return nullptr;
     }
-    if (kernelCode.empty()) {
-        printf("Warning: Attempting to add empty kernel code\n");
-        return 1;
-    }
-    _kernelCodes.push_back(std::string(kernelCode));
-    return 0;
+    return _buffers.at(name).first;
 }
 
-int Context::Build(const std::vector<std::string> &extraIncludes) {
-    if (!initialized || _kernelCodes.empty()) {
-        printf("Warning: Attempting to build unitialized program\n");
-        built = false;
-        return 1;
+const size_t Context::GetBufferSize(const std::string &name) {
+    if (_buffers.count(name) == 0) {
+        return {};
+    }
+    return _buffers.at(name).second;
+}
+
+KernelHandle *Context::AddKernel(const std::string &code,
+                                 const std::vector<std::string> &includes,
+                                 const std::string &kernelName,
+                                 const std::string &key) {
+
+    KernelHandle handle;
+
+    if (!key.empty()) {
+        handle.key = key;
+    } else {
+        handle.key = kernelName;
     }
 
-    if (built) {
-        return 0;
+    if (auto foundKernel = _kernels.find(handle.key); foundKernel != _kernels.end()) {
+        if (foundKernel->second.built) {
+            return &foundKernel->second;
+        }
     }
-    cl_int err;
 
-    _program = cl::Program(_context, _kernelCodes, &err);
+    int err;
+    handle.program = cl::Program(_context, code.c_str(), false, &err);
+
     if (err != CL_SUCCESS) {
-        built = false;
+        handle.built = false;
         printf("Error: Failed to create compute program! %i \n", err);
-        return 1;
+        return nullptr;
     }
 
     std::string flags = "-cl-std=CL1.2 ";
     for (utils::ClFile clFile : utils::ClFile::GetKernelPaths()) {
         flags.append(std::string("-I ").append(clFile.path));
     }
-    for (std::string path : extraIncludes) {
+    for (std::string path : includes) {
         flags.append(std::string("-I ").append(path));
     }
-    err = _program.build(_device, flags.c_str(), nullptr);
+    err = handle.program.build(_device, flags.c_str(), nullptr);
 
     if (err != CL_SUCCESS) {
-        std::string t;
-        _program.getBuildInfo(_device, CL_PROGRAM_BUILD_LOG, &t);
-
-        printf("%s \n", t.c_str());
-        built = false;
-        printf("Error: Failed to build program executable! %i \n", err);
-
-        return 1;
-    }
-    built = true;
-    return 0;
-}
-
-KernelHandle *Context::AddKernel(const std::string &kernelName,
-                                 const std::string &key) {
-
-    if (_kernels.find(kernelName) != _kernels.end()) {
-        printf("Error: Kernel with name %s already exists\n",
+        handle.built = false;
+        printf("Error: Failed to build program %s\n",
                kernelName.c_str());
         return nullptr;
     }
 
-    int err;
-    if (!built) {
-        err = Build();
-        if (err != CL_SUCCESS) {
-            return nullptr;
-        }
-    }
+    handle.kernel = cl::Kernel(handle.program, kernelName.c_str(), &err);
 
-    KernelHandle handle;
-    if (!key.empty()) {
-        handle.key = key;
-    } else {
-        handle.key = kernelName;
-    }
-    cl::Kernel kernel(_program, kernelName.c_str(), &err);
     if (err != CL_SUCCESS) {
-        built = false;
+        handle.built = false;
         printf("Error: Failed to create compute kernel with name %s\n",
                kernelName.c_str());
         return nullptr;
     }
-    handle.kernel = kernel;
+
+    handle.built = true;
     handle.context = &_context;
     handle.queue = &_queue;
     _kernels[handle.key] = handle;
     return &_kernels[handle.key];
 }
 
-void Context::RemoveKernel(KernelHandle* kernel) {
+void Context::RemoveKernel(KernelHandle *kernel) {
     KernelMap::iterator it = _kernels.find(kernel->key);
     if (it == _kernels.end()) {
         return;
@@ -150,8 +180,7 @@ void Context::RemoveKernel(KernelHandle* kernel) {
     long idx = std::distance(_kernels.begin(), it);
 
     _kernels.erase(it);
-    _kernelCodes.erase(_kernelCodes.begin() + idx);
-    built = false;
+    kernel->built = false;
 }
 
 KernelHandle *Context::GetKernelHandle(const std::string &name) {
@@ -173,8 +202,8 @@ int Context::Execute(const size_t &global, KernelHandle *kernelHandle) {
     if (!initialized) {
         return 1;
     }
-    if (!built) {
-        Build();
+    if (!kernelHandle->built) {
+        return 1;
     }
 
     size_t local;
@@ -191,6 +220,8 @@ int Context::Execute(const size_t &global, KernelHandle *kernelHandle) {
                                       cl::NDRange(global), cl::NullRange, NULL,
                                       &ev);
     ev.wait();
+    // _queue.finish();
+    // _queue.flush();
     if (err != CL_SUCCESS) {
         printf("Error: Failed to execute kernel!\n");
         return 1;

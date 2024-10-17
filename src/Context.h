@@ -33,20 +33,22 @@ namespace peasyocl {
 
 struct KernelHandle;
 
+using SharedBuffer = std::shared_ptr<cl::Buffer>;
 using KernelMap = std::map<cl::string, KernelHandle>;
 using ArgumentMap = std::unordered_map<std::string, int>;
 using BufferMap =
-    std::unordered_map<std::string, std::pair<cl::Buffer, size_t>>;
+    std::unordered_map<std::string, std::pair<SharedBuffer, size_t>>;
 
 struct KernelHandle {
     cl::Kernel kernel;
-
     ArgumentMap arguments;
-    BufferMap buffers;
     std::string key;
     cl::CommandQueue *queue;
     cl::Context *context;
+    cl::Program program;
+    std::string code;
 
+    bool built = false;
     bool dirty = true;
 
     int argCount = 0;
@@ -151,7 +153,7 @@ struct KernelHandle {
      * @return int
      */
     template <typename T>
-    int ReadBufferData(T *data, cl::Buffer buffer, const size_t size);
+    int ReadBufferData(T *data, SharedBuffer buffer, const size_t size);
 
     /**
      * @brief Set the data of buffer
@@ -163,21 +165,21 @@ struct KernelHandle {
      * @return int
      */
     template <typename T>
-    int SetBufferData(T *data, cl::Buffer buffer, const size_t size);
+    int SetBufferData(T *data, SharedBuffer buffer, const size_t size);
 
     /**
      * @brief Read the data of buffer with name
      *
      * @tparam T
      * @param data
-     * @param bufferName Buffer to set. Name is associated with the name created
+     * @param name Buffer to set. Name is associated with the name created
      * with AddArgument function
      * @return int
      */
     template <typename T>
-    int ReadBufferData(T *data, const std::string &bufferName);
+    int ReadBufferData(T *data, const std::string &name);
     template <typename T>
-    int ReadBufferData(T *data, const std::string &bufferName,
+    int ReadBufferData(T *data, const std::string &name,
                        const size_t &size);
 
     /**
@@ -185,14 +187,14 @@ struct KernelHandle {
      *
      * @tparam T
      * @param data Of type T*
-     * @param bufferName Buffer to set. Name is associated with the name created
+     * @param name Buffer to set. Name is associated with the name created
      * with AddArgument function
      * @return int
      */
     template <typename T>
-    int SetBufferData(T *data, const std::string &bufferName);
+    int SetBufferData(T *data, const std::string &name);
     template <typename T>
-    int SetBufferData(T *data, const std::string &bufferName,
+    int SetBufferData(T *data, const std::string &name,
                       const size_t &size);
 };
 
@@ -203,16 +205,6 @@ struct KernelHandle {
 class Context {
   public:
     int Init();
-
-    /**
-     * @brief Build the opencl program. Will by default look up
-     * OPENCL_KERNEL_PATHS env var to find include paths
-     *
-     * @param extraIncludes Pass additional include paths
-     * @return int
-     */
-    int Build(const std::vector<std::string> &extraIncludes =
-                  std::vector<std::string>());
 
     /**
      * @brief Get the Instance of the DeformerContext singleton
@@ -230,7 +222,7 @@ class Context {
      * @return true
      * @return false
      */
-    bool IsValid() const { return built && initialized; }
+    bool IsValid() const { return initialized; }
 
     /**
      * @brief Add a .cl or .ocl file for executing
@@ -239,8 +231,8 @@ class Context {
      * OCL_KERNEL_PATHS environment
      * @return int
      */
-    int AddSource(const utils::ClFile &clfile);
-    int AddSource(const std::string_view &fileName);
+    // int AddSource(const utils::ClFile &clfile);
+    // int AddSource(const std::string_view &fileName);
 
     /**
      * @brief Load a kernel from the sources added. Returns a KernelHandle which
@@ -252,7 +244,9 @@ class Context {
      * @param err
      * @return KernelHandle*
      */
-    KernelHandle *AddKernel(const std::string &kernelName,
+    KernelHandle *AddKernel(const std::string &code,
+                            const std::vector<std::string> &includes,
+                            const std::string &kernelName,
                             const std::string &key = "");
 
     void RemoveKernel(KernelHandle *kernel);
@@ -266,6 +260,9 @@ class Context {
      */
     KernelHandle *GetKernelHandle(const std::string &name);
 
+    // int Build(const std::vector<std::string> &extraIncludes =
+    //                        std::vector<std::string>());
+
     /**
      * @brief Check whether the specific kernel exists
      *
@@ -276,6 +273,12 @@ class Context {
     bool HasKernel(const std::string &name) {
         return _kernels.find(name) != _kernels.end();
     }
+
+    void AddBuffer(const std::string &name, SharedBuffer buffer,
+                   const size_t &size);
+    SharedBuffer GetBuffer(const std::string &name);
+    const size_t GetBufferSize(const std::string &name);
+    // const int GetBufferIndex(const std::string &name);
 
     /**
      * @brief Execute a kernel with name kernelName
@@ -293,8 +296,9 @@ class Context {
      */
     void Finish();
 
+  protected:
     // Is true once everything is initialized
-    bool built = false;
+    std::map<std::string, bool> built;
     bool initialized = false;
 
   private:
@@ -306,13 +310,16 @@ class Context {
 
     cl::string _LoadShader(const std::string_view &fileName, int *err);
 
-    cl::vector<cl::string> _kernelCodes;
+    // cl::vector<cl::string> _kernelCodes;
 
     cl::Context _context;
     cl::CommandQueue _queue;
     cl::Program _program;
+    BufferMap _buffers;
+    ArgumentMap _arguments;
     KernelMap _kernels;
     cl::Device _device;
+    int _buffer_count;
 };
 
 template <typename T>
@@ -320,15 +327,18 @@ inline int KernelHandle::AddArgument(cl_mem_flags flags,
                                      const std::string &name,
                                      const size_t &size, T *data) {
     dirty = true;
-    cl::Buffer d_data(*context, flags, size);
 
+    if (auto buff = Context::GetInstance()->GetBuffer(name); buff == nullptr) {
+        SharedBuffer d_data =
+            std::make_shared<cl::Buffer>(*context, flags, size);
+        Context::GetInstance()->AddBuffer(name, d_data, size);
+    }
     if (data != nullptr) {
-        SetBufferData(data, d_data, size);
+        SetBufferData(data, Context::GetInstance()->GetBuffer(name), size);
     }
 
-    SetArgument<cl_mem, cl::Buffer>(argCount, &d_data);
-    buffers.insert({name, {d_data, size}});
-
+    SetArgument<cl_mem, cl::Buffer>(
+        argCount, Context::GetInstance()->GetBuffer(name).get());
     arguments.insert({name, argCount});
     argCount++;
     return 0;
@@ -338,17 +348,16 @@ template <typename T>
 inline int KernelHandle::AddArgument(cl_mem_flags flags,
                                      const std::string &name,
                                      const size_t &size, const T &data) {
-    dirty = true;
-    cl::Buffer d_data(*context, flags, size);
+    // dirty = true;
+    // SharedBuffer d_data = std::make_shared<cl::Buffer>(*context, flags,
+    // size); SetBufferData(&data, d_data, size);
 
-    SetBufferData(&data, d_data, size);
-
-    SetArgument<cl_mem, cl::Buffer>(argCount, &d_data);
-    buffers.insert({name, {d_data, size}});
-
-    arguments.insert({name, argCount});
-    argCount++;
-    return 0;
+    // SetArgument<cl_mem, cl::Buffer>(argCount, d_data.get());
+    // Context::GetInstance()->AddBuffer(name, d_data, size);
+    // arguments.insert({name, argCount});
+    // argCount++;
+    // return 0;
+    return AddArgument(flags, name, size, &data);
 }
 
 template <typename T>
@@ -391,10 +400,11 @@ inline int KernelHandle::SetArgument(const std::string &name, const T &data) {
 }
 
 template <typename T>
-inline int KernelHandle::SetBufferData(T *data, cl::Buffer buffer,
+inline int KernelHandle::SetBufferData(T *data, SharedBuffer buffer,
                                        const size_t size) {
-    cl_int err = queue->enqueueWriteBuffer(buffer, CL_TRUE, 0, size, data);
+    cl_int err = queue->enqueueWriteBuffer(*buffer, CL_TRUE, 0, size, data);
     if (err != CL_SUCCESS) {
+        printf("%i \n", err);
         printf("Error: Failed to write data to source array!\n");
         return 1;
     }
@@ -403,33 +413,34 @@ inline int KernelHandle::SetBufferData(T *data, cl::Buffer buffer,
 }
 
 template <typename T>
-inline int KernelHandle::SetBufferData(T *data, const std::string &bufferName) {
-    if (arguments.find(bufferName) == arguments.end()) {
-        printf("Error: Buffer %s is not recognized!\n", bufferName.c_str());
+inline int KernelHandle::SetBufferData(T *data, const std::string &name) {
+    if (arguments.find(name) == arguments.end()) {
+        printf("Error: Buffer %s is not recognized!\n", name.c_str());
         return 1;
     }
 
     dirty = true;
-    return SetBufferData(data, buffers[bufferName].first,
-                         buffers[bufferName].second);
+    return SetBufferData(data, Context::GetInstance()->GetBuffer(name),
+                         Context::GetInstance()->GetBufferSize(name));
 }
 
 template <typename T>
-inline int KernelHandle::SetBufferData(T *data, const std::string &bufferName,
+inline int KernelHandle::SetBufferData(T *data, const std::string &name,
                                        const size_t &size) {
-    if (arguments.find(bufferName) == arguments.end()) {
-        printf("Error: Buffer %s is not recognized!\n", bufferName.c_str());
+    if (arguments.find(name) == arguments.end()) {
+        printf("Error: Buffer %s is not recognized!\n", name.c_str());
         return 1;
     }
 
     dirty = true;
-    return SetBufferData(data, buffers[bufferName].first, size);
+    return SetBufferData(data, Context::GetInstance()->GetBuffer(name),
+                         size);
 }
 
 template <typename T>
-inline int KernelHandle::ReadBufferData(T *data, cl::Buffer buffer,
+inline int KernelHandle::ReadBufferData(T *data, SharedBuffer buffer,
                                         const size_t size) {
-    cl_int err = queue->enqueueReadBuffer(buffer, CL_TRUE, 0, size, data);
+    cl_int err = queue->enqueueReadBuffer(*buffer, CL_TRUE, 0, size, data);
     if (err != CL_SUCCESS) {
         printf("Error: Failed to read output array! %d\n", err);
         return 1;
@@ -439,18 +450,18 @@ inline int KernelHandle::ReadBufferData(T *data, cl::Buffer buffer,
 
 template <typename T>
 inline int KernelHandle::ReadBufferData(T *data,
-                                        const std::string &bufferName) {
-    return ReadBufferData(data, buffers[bufferName].first,
-                          buffers[bufferName].second);
+                                        const std::string &name) {
+    return ReadBufferData(data, Context::GetInstance()->GetBuffer(name),
+                          Context::GetInstance()->GetBufferSize(name));
 }
 
 template <typename T>
-inline int KernelHandle::ReadBufferData(T *data, const std::string &bufferName,
+inline int KernelHandle::ReadBufferData(T *data, const std::string &name,
                                         const size_t &size) {
-    return ReadBufferData(data, buffers[bufferName].first, size);
+    // return ReadBufferData(data, buffers[name].first, size);
+    return ReadBufferData(data, Context::GetInstance()->GetBuffer(name),
+                          size);
 }
-
-#define CAT (x, y) x##y
 
 } // namespace peasyocl
 
